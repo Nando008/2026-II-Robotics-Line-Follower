@@ -167,13 +167,13 @@ constexpr int16_t LINE_LOST_HIGH = 6750;
 //    like extra "push" on sustained curves than a classic integral.
 //    Too high: slow, wide oscillation.
 constexpr float   KP = 0.08f;
-constexpr float   KI = 0.01f;
-constexpr float   KD = 1.8f;
+constexpr float   KI = 0.00f;
+constexpr float   KD = 0.10f;
 constexpr uint8_t INTEGRAL_WINDOW = 6;
 
 // ================== SPEEDS (PWM duty, 0-255) ==================
 // BASE_SPEED: speed of both wheels on a centered line. During line following
-// no wheel ever goes above this value (the PID only slows one wheel down).
+// no wheel ever goes above5 this value (the PID only slows one wheel down).
 // Raise it only after the PID is stable at the current value.
 constexpr int BASE_SPEED = 80;
 
