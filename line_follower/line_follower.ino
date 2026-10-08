@@ -22,6 +22,11 @@
  *   - Battery level changes motor speed. Compare runs with similar charge.
  *
  *  Recommended order:
+ *   0. Check directions before tuning anything:
+ *        - Both wheels turn forward (motor_test.ino, INVERT_*_MOTOR).
+ *        - The robot steers TOWARD the line (INVERT_LINE_POSITION). If it
+ *          steers away and gets worse the more off-center it is, flip it.
+ *      No PID value can fix a wrong direction.
  *   1. Check calibration (see CALIBRATION section below).
  *   2. Find MIN_SPEED for each motor (see SPEEDS section).
  *   3. Tune the PID at a low BASE_SPEED:
@@ -58,7 +63,7 @@ constexpr uint8_t PIN_STANDBY   = 6;
 // it should go forward (motor wires or IN1/IN2 swapped). Use motor_test.ino
 // to check: in its ramps, every wheel must turn forward.
 // Keep these values identical in motor_test.ino.
-constexpr bool INVERT_LEFT_MOTOR  = true;   // left motor ran backward in tests
+constexpr bool INVERT_LEFT_MOTOR  = false;
 constexpr bool INVERT_RIGHT_MOTOR = false;
 
 // D12 is wired to a pushbutton whose other leg goes to 5V. It is not used,
@@ -105,6 +110,17 @@ constexpr uint8_t SENSOR_COUNT    = 8;
 constexpr uint8_t PIN_QTR_EMITTER = 13;
 const uint8_t QTR_PINS[SENSOR_COUNT] = {A7, A6, A5, A4, A3, A2, A1, A0};
 
+// Highest position readLineBlack() can return: (SENSOR_COUNT - 1) * 1000.
+constexpr uint16_t LINE_POSITION_MAX = (SENSOR_COUNT - 1) * 1000;
+
+// Sensor bar orientation. The rest of the code expects:
+//   position < LINE_CENTER  ->  line is on the robot's LEFT
+//   position > LINE_CENTER  ->  line is on the robot's RIGHT
+// If the robot steers AWAY from the line (it gets worse the more off-center
+// it is, and it spins the wrong way when it loses the line), flip this.
+// It corrects both the PID and recoverLine(), since both use linePosition.
+constexpr bool INVERT_LINE_POSITION = true;
+
 // ---- CALIBRATION ----
 // Total calibration time ~= CALIBRATION_SAMPLES * (CALIBRATION_SAMPLE_DELAY_MS
 // + read time). Currently ~4-5 s. During that time slide the robot so EVERY
@@ -121,12 +137,12 @@ constexpr uint16_t CALIBRATION_SAMPLE_DELAY_MS = 10;
 
 // Time between the end of calibration and the start, to place the robot on
 // the line. Raise it if you need more time.
-constexpr uint16_t START_DELAY_MS = 2000;
+constexpr uint16_t START_DELAY_MS = 1500;
 
-// ================== Line position (0..7000 for 8 sensors) ==================
+// ================== Line position (0..LINE_POSITION_MAX) ==================
 // LINE_CENTER: position reported when the line is under the middle of the
 // sensor bar. Do not change unless the bar is mounted off-center.
-constexpr int16_t LINE_CENTER = 3500;
+constexpr int16_t LINE_CENTER = LINE_POSITION_MAX / 2;
 
 // When the position goes past these limits, the robot considers the line
 // lost and runs recoverLine() (spins toward the side where it was last seen).
@@ -140,8 +156,8 @@ constexpr int16_t LINE_LOST_HIGH = 6750;
 // ================== PID ==================
 // The error goes from -3500 to +3500. The correction is limited to
 // +-BASE_SPEED, so it saturates quickly:
-//  - KP alone saturates when |error| > BASE_SPEED / KP (currently 50 / 0.08
-//    = 625, i.e. less than one sensor away from the center).
+//  - KP alone saturates when |error| > BASE_SPEED / KP (currently 80 / 0.08
+//    = 1000, i.e. one sensor away from the center).
 //  - KP: how hard it turns for a given offset. Too low: misses curves.
 //    Too high: wobbles on straights.
 //  - KD: reacts to how fast the error changes; damps the wobble. Too low:
@@ -159,7 +175,7 @@ constexpr uint8_t INTEGRAL_WINDOW = 6;
 // BASE_SPEED: speed of both wheels on a centered line. During line following
 // no wheel ever goes above this value (the PID only slows one wheel down).
 // Raise it only after the PID is stable at the current value.
-constexpr int BASE_SPEED = 50;
+constexpr int BASE_SPEED = 80;
 
 // MAX_SPEED: cap applied to every motor command in driveMotor(). Since line
 // following never exceeds BASE_SPEED, in practice this cap only affects
@@ -173,7 +189,7 @@ constexpr int MAX_SPEED  = 90;
 //    of the two motors' values plus ~10%.
 //  - Too low: a wheel stops in curves instead of slowing down.
 //    Too high: the PID loses resolution (fewer steps between MIN and BASE).
-constexpr int MIN_SPEED  = 30;
+constexpr int MIN_SPEED  = 50;
 
 // Brake / recovery speeds used by recoverLine().
 // NOTE: both are currently capped to MAX_SPEED (90) by driveMotor(), so the
@@ -192,6 +208,7 @@ uint8_t errorHistoryIndex = 0;
 
 // ================== Function prototypes ==================
 void calibrateSensors();
+uint16_t readLinePosition();
 void followLine();
 void recoverLine();
 int applyMinimumSpeed(int speed);
@@ -223,7 +240,7 @@ void setup() {
 }
 
 void loop() {
-  linePosition = qtr.readLineBlack(sensorValues);
+  linePosition = readLinePosition();
 
   if (linePosition <= LINE_LOST_LOW || linePosition >= LINE_LOST_HIGH) {
     recoverLine();
@@ -237,6 +254,18 @@ void calibrateSensors() {
     qtr.calibrate();
     delay(CALIBRATION_SAMPLE_DELAY_MS);
   }
+}
+
+// Line position from the robot's point of view:
+// 0 = far left, LINE_CENTER = centered, LINE_POSITION_MAX = far right.
+uint16_t readLinePosition() {
+  uint16_t position = qtr.readLineBlack(sensorValues);
+
+  if (INVERT_LINE_POSITION) {
+    position = LINE_POSITION_MAX - position;
+  }
+
+  return position;
 }
 
 void followLine() {
@@ -261,6 +290,8 @@ void followLine() {
   int leftSpeed = BASE_SPEED;
   int rightSpeed = BASE_SPEED;
 
+  // correction < 0: line on the left  -> slow the left wheel  -> turn left.
+  // correction > 0: line on the right -> slow the right wheel -> turn right.
   if (correction < 0) {
     leftSpeed += correction;
   } else {
@@ -270,11 +301,12 @@ void followLine() {
   setMotorSpeeds(applyMinimumSpeed(leftSpeed), applyMinimumSpeed(rightSpeed));
 }
 
+// Line lost: spin in place toward the side where it was last seen.
 void recoverLine() {
   if (linePosition <= LINE_LOST_LOW) {
-    setMotorSpeeds(-BRAKE_REVERSE_SPEED, BRAKE_FORWARD_SPEED);
+    setMotorSpeeds(-BRAKE_REVERSE_SPEED, BRAKE_FORWARD_SPEED);  // turn left
   } else {
-    setMotorSpeeds(BRAKE_FORWARD_SPEED, -BRAKE_REVERSE_SPEED);
+    setMotorSpeeds(BRAKE_FORWARD_SPEED, -BRAKE_REVERSE_SPEED);  // turn right
   }
 }
 

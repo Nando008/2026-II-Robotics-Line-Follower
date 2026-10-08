@@ -46,7 +46,7 @@ constexpr uint8_t PIN_LED       = 13;
 // Motor direction correction. Set to true if that motor turns BACKWARD in
 // the ramps below (motor wires or IN1/IN2 swapped). Once both wheels turn
 // forward here, copy the same values into line_follower.ino.
-constexpr bool INVERT_LEFT_MOTOR  = true;   // left motor ran backward in tests
+constexpr bool INVERT_LEFT_MOTOR  = false;   // left motor ran backward in tests
 constexpr bool INVERT_RIGHT_MOTOR = false;
 
 // D12 is wired to a pushbutton connected to 5V: keep it as INPUT
