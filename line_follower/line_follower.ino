@@ -54,6 +54,13 @@ constexpr uint8_t PIN_RIGHT_IN2 = 4;
 
 constexpr uint8_t PIN_STANDBY   = 6;
 
+// Motor direction correction. Set to true if that motor turns BACKWARD when
+// it should go forward (motor wires or IN1/IN2 swapped). Use motor_test.ino
+// to check: in its ramps, every wheel must turn forward.
+// Keep these values identical in motor_test.ino.
+constexpr bool INVERT_LEFT_MOTOR  = true;   // left motor ran backward in tests
+constexpr bool INVERT_RIGHT_MOTOR = false;
+
 // D12 is wired to a pushbutton whose other leg goes to 5V. It is not used,
 // but it must stay as INPUT: if it were an OUTPUT driven LOW, pressing the
 // button would short 5V to ground through the pin.
@@ -189,7 +196,7 @@ void followLine();
 void recoverLine();
 int applyMinimumSpeed(int speed);
 void setMotorSpeeds(int leftSpeed, int rightSpeed);
-void driveMotor(uint8_t in1Pin, uint8_t in2Pin, uint8_t pwmPin, int speed);
+void driveMotor(uint8_t in1Pin, uint8_t in2Pin, uint8_t pwmPin, bool inverted, int speed);
 void stopMotors();
 
 void setup() {
@@ -278,12 +285,19 @@ int applyMinimumSpeed(int speed) {
 }
 
 void setMotorSpeeds(int leftSpeed, int rightSpeed) {
-  driveMotor(PIN_LEFT_IN1, PIN_LEFT_IN2, PIN_PWM_LEFT, leftSpeed);
-  driveMotor(PIN_RIGHT_IN1, PIN_RIGHT_IN2, PIN_PWM_RIGHT, rightSpeed);
+  driveMotor(PIN_LEFT_IN1, PIN_LEFT_IN2, PIN_PWM_LEFT, INVERT_LEFT_MOTOR, leftSpeed);
+  driveMotor(PIN_RIGHT_IN1, PIN_RIGHT_IN2, PIN_PWM_RIGHT, INVERT_RIGHT_MOTOR, rightSpeed);
 }
 
-void driveMotor(uint8_t in1Pin, uint8_t in2Pin, uint8_t pwmPin, int speed) {
+// speed > 0 = forward, speed < 0 = backward, from the robot's point of view.
+// The inversion is applied here, so the rest of the code never needs to
+// know how each motor is wired.
+void driveMotor(uint8_t in1Pin, uint8_t in2Pin, uint8_t pwmPin, bool inverted, int speed) {
   speed = constrain(speed, -MAX_SPEED, MAX_SPEED);
+
+  if (inverted) {
+    speed = -speed;
+  }
 
   if (speed >= 0) {
     digitalWrite(in1Pin, HIGH);

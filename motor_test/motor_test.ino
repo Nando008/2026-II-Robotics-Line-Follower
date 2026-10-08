@@ -12,8 +12,8 @@
  *  time, so you can match what you see with the PWM value.
  *
  *  What to look for:
- *   - Each wheel turns FORWARD. If one turns backward, its two motor wires
- *     (or IN1/IN2) are swapped.
+ *   - Each wheel turns FORWARD. If one turns backward, flip its
+ *     INVERT_*_MOTOR constant (or swap its two motor wires).
  *   - In step 2 only the left wheel moves, in step 3 only the right one.
  *     If it's the other way around, the left/right pins are swapped.
  *   - The PWM at which each wheel STARTS turning: that is the base for
@@ -43,6 +43,12 @@ constexpr uint8_t PIN_RIGHT_IN2 = 4;
 constexpr uint8_t PIN_STANDBY   = 6;
 constexpr uint8_t PIN_LED       = 13;
 
+// Motor direction correction. Set to true if that motor turns BACKWARD in
+// the ramps below (motor wires or IN1/IN2 swapped). Once both wheels turn
+// forward here, copy the same values into line_follower.ino.
+constexpr bool INVERT_LEFT_MOTOR  = true;   // left motor ran backward in tests
+constexpr bool INVERT_RIGHT_MOTOR = false;
+
 // D12 is wired to a pushbutton connected to 5V: keep it as INPUT
 // (see line_follower.ino for the reason).
 constexpr uint8_t PIN_UNUSED_BUTTON = 12;
@@ -67,7 +73,7 @@ bool sequenceDone = false;
 void runStep(const __FlashStringHelper *name, MotorSelection motors, LedMode ledMode);
 void rampMotors(MotorSelection motors, LedMode ledMode);
 void setSelectedMotorsForward(MotorSelection motors, uint8_t pwm);
-void setMotorForward(uint8_t in1Pin, uint8_t in2Pin, uint8_t pwmPin, uint8_t pwm);
+void setMotorForward(uint8_t in1Pin, uint8_t in2Pin, uint8_t pwmPin, bool inverted, uint8_t pwm);
 void stopMotors();
 
 void setup() {
@@ -167,16 +173,18 @@ void rampMotors(MotorSelection motors, LedMode ledMode) {
 
 void setSelectedMotorsForward(MotorSelection motors, uint8_t pwm) {
   if (motors == MotorSelection::Both || motors == MotorSelection::Left) {
-    setMotorForward(PIN_LEFT_IN1, PIN_LEFT_IN2, PIN_PWM_LEFT, pwm);
+    setMotorForward(PIN_LEFT_IN1, PIN_LEFT_IN2, PIN_PWM_LEFT, INVERT_LEFT_MOTOR, pwm);
   }
   if (motors == MotorSelection::Both || motors == MotorSelection::Right) {
-    setMotorForward(PIN_RIGHT_IN1, PIN_RIGHT_IN2, PIN_PWM_RIGHT, pwm);
+    setMotorForward(PIN_RIGHT_IN1, PIN_RIGHT_IN2, PIN_PWM_RIGHT, INVERT_RIGHT_MOTOR, pwm);
   }
 }
 
-void setMotorForward(uint8_t in1Pin, uint8_t in2Pin, uint8_t pwmPin, uint8_t pwm) {
-  digitalWrite(in1Pin, HIGH);
-  digitalWrite(in2Pin, LOW);
+// "Forward" from the robot's point of view: if the motor is inverted, the
+// IN1/IN2 levels are swapped so the wheel still turns forward.
+void setMotorForward(uint8_t in1Pin, uint8_t in2Pin, uint8_t pwmPin, bool inverted, uint8_t pwm) {
+  digitalWrite(in1Pin, inverted ? LOW : HIGH);
+  digitalWrite(in2Pin, inverted ? HIGH : LOW);
   analogWrite(pwmPin, pwm);
 }
 
