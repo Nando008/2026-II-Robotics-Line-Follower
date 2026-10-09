@@ -166,16 +166,16 @@ constexpr int16_t LINE_LOST_HIGH = 6750;
 //    previous INTEGRAL_WINDOW errors only (short memory), so it acts more
 //    like extra "push" on sustained curves than a classic integral.
 //    Too high: slow, wide oscillation.
-constexpr float   KP = 0.08f;
+constexpr float   KP = 0.13f;
 constexpr float   KI = 0.00f;
-constexpr float   KD = 0.22f;
+constexpr float   KD = 0.29f;
 constexpr uint8_t INTEGRAL_WINDOW = 6;
 
 // ================== SPEEDS (PWM duty, 0-255) ==================
 // BASE_SPEED: speed of both wheels on a centered line. During line following
 // no wheel ever goes above this value (the PID only slows one wheel down).
 // Raise it only after the PID is stable at the current value.
-constexpr int BASE_SPEED = 130;
+constexpr int BASE_SPEED = 150;
 
 // MAX_SPEED: cap applied to every motor command in driveMotor(). Since line
 // following never exceeds BASE_SPEED, in practice this cap only affects
