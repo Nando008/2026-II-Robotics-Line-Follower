@@ -166,7 +166,7 @@ constexpr int16_t LINE_LOST_HIGH = 6750;
 //    previous INTEGRAL_WINDOW errors only (short memory), so it acts more
 //    like extra "push" on sustained curves than a classic integral.
 //    Too high: slow, wide oscillation.
-constexpr float   KP = 0.13f;
+constexpr float   KP = 0.15f;
 constexpr float   KI = 0.00f;
 constexpr float   KD = 0.16f;
 constexpr uint8_t INTEGRAL_WINDOW = 6;
@@ -194,8 +194,8 @@ constexpr int MIN_SPEED  = 50;
 // Brake / recovery speeds used by recoverLine().
 // NOTE: both are currently capped to MAX_SPEED by driveMotor(), so the
 // robot actually recovers at -90 / +90, not -120 / +220.
-constexpr int BRAKE_FORWARD_SPEED = 220;
-constexpr int BRAKE_REVERSE_SPEED = 120;
+constexpr int BRAKE_FORWARD_SPEED = 90;
+constexpr int BRAKE_REVERSE_SPEED = 90;
 
 // ================== State ==================
 QTRSensors qtr;
