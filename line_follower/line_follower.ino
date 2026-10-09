@@ -137,7 +137,7 @@ constexpr uint16_t CALIBRATION_SAMPLE_DELAY_MS = 10;
 
 // Time between the end of calibration and the start, to place the robot on
 // the line. Raise it if you need more time.
-constexpr uint16_t START_DELAY_MS = 1500;
+constexpr uint16_t START_DELAY_MS = 1000;
 
 // ================== Line position (0..LINE_POSITION_MAX) ==================
 // LINE_CENTER: position reported when the line is under the middle of the
@@ -173,7 +173,7 @@ constexpr uint8_t INTEGRAL_WINDOW = 6;
 
 // ================== SPEEDS (PWM duty, 0-255) ==================
 // BASE_SPEED: speed of both wheels on a centered line. During line following
-// no wheel ever goes above5 this value (the PID only slows one wheel down).
+// no wheel ever goes above this value (the PID only slows one wheel down).
 // Raise it only after the PID is stable at the current value.
 constexpr int BASE_SPEED = 90;
 
@@ -192,8 +192,8 @@ constexpr int MAX_SPEED  = 200;
 constexpr int MIN_SPEED  = 50;
 
 // Brake / recovery speeds used by recoverLine().
-// NOTE: both are currently capped to MAX_SPEED (90) by driveMotor(), so the
-// robot actually recovers at -90 / +90, not -120 / +220. Pending decision.
+// NOTE: both are currently capped to MAX_SPEED by driveMotor(), so the
+// robot actually recovers at -90 / +90, not -120 / +220.
 constexpr int BRAKE_FORWARD_SPEED = 220;
 constexpr int BRAKE_REVERSE_SPEED = 120;
 
