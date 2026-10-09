@@ -8,6 +8,15 @@
  *  line by hand during this time), then it waits START_DELAY_MS and starts
  *  following the line. There is no way to stop it except cutting power.
  *
+ *  Speed control has three parts. The last two can be switched on and off:
+ *   - PID steering: keeps the line under the center of the sensor bar.
+ *   - Speed scheduling (ENABLE_SPEED_SCHEDULING): runs at STRAIGHT_SPEED while
+ *     the line is centered, slows down toward CURVE_SPEED as the robot moves
+ *     off-center (corners), and accelerates back gradually.
+ *   - Two-wheel steering (ENABLE_TWO_WHEEL_STEERING): turns by slowing the
+ *     inner wheel AND speeding up the outer one, instead of only slowing the
+ *     inner wheel, so the robot keeps more speed while correcting.
+ *
  * -----------------------------------------------------------------------------
  *  HOW TO TUNE (read this before touching any constant)
  * -----------------------------------------------------------------------------
@@ -29,7 +38,9 @@
  *      No PID value can fix a wrong direction.
  *   1. Check calibration (see CALIBRATION section below).
  *   2. Find MIN_SPEED for each motor (see SPEEDS section).
- *   3. Tune the PID at a low BASE_SPEED:
+ *   3. Tune the PID with both features OFF. With scheduling off the robot runs
+ *      at STRAIGHT_SPEED everywhere, so use a STRAIGHT_SPEED low enough to
+ *      take every corner cleanly:
  *        a. Set KI = 0 and KD = 0.
  *        b. Raise KP until the robot follows the line but wobbles on
  *           straights. Then lower it ~20-30%.
@@ -38,8 +49,17 @@
  *        d. Only if the robot consistently runs off-center (always to the
  *           same side, or always late in long curves), add a small KI.
  *           If it starts to swing in slow, wide waves, KI is too high.
- *   4. Raise BASE_SPEED in small steps (~5-10). At each step, if it wobbles
- *      again, raise KD a bit; if it misses curves, raise KP a bit.
+ *      Then set CURVE_SPEED to the speed you tuned at.
+ *   4. Turn ON speed scheduling and raise STRAIGHT_SPEED in steps of ~10-20.
+ *      Leave KP/KD alone: the PID works hardest in corners, where the robot
+ *      now runs at CURVE_SPEED, the speed you tuned it at.
+ *      See the SPEED SCHEDULING section.
+ *   5. Turn ON two-wheel steering. See the TWO-WHEEL STEERING section.
+ *   6. Only after that, try raising CURVE_SPEED, applying the scaling rule.
+ *
+ *  Scaling rule: when you change the speed the PID was tuned at, start from
+ *  KP * newSpeed / oldSpeed and the SAME KD, then fine-tune. At higher speed
+ *  expect to end slightly below that KP or slightly above that KD.
  *
  *  Steps: KP and KD in ~20-30% steps; KI in x2 or /2 steps.
  *
@@ -123,17 +143,14 @@ constexpr bool INVERT_LINE_POSITION = true;
 
 // ---- CALIBRATION ----
 // Total calibration time ~= CALIBRATION_SAMPLES * (CALIBRATION_SAMPLE_DELAY_MS
-// + read time). Currently ~4-5 s. During that time slide the robot so EVERY
-// sensor passes over the line and over the background several times.
+// + read time). During that time slide the robot so EVERY sensor passes over
+// the line and over the background several times.
 //  - If the robot behaves differently each time you power it on, calibration
 //    is probably incomplete: increase CALIBRATION_SAMPLES or sweep more times.
-//  - Checking on the bench (robot still, USB connected, a separate test
-//    sketch): after calibrating, print qtr.calibrationOn.minimum[i] and
-//    .maximum[i]. Every sensor should have a clear gap between min and max.
-//    A sensor with min close to max did not see the line or the background.
+//  - Checking on the bench: use qtr_test.ino.
 //  - Recalibrate if the lighting or the track surface changes.
-constexpr uint16_t CALIBRATION_SAMPLES         = 200; // 400;
-constexpr uint16_t CALIBRATION_SAMPLE_DELAY_MS = 8; // 10;
+constexpr uint16_t CALIBRATION_SAMPLES         = 200;
+constexpr uint16_t CALIBRATION_SAMPLE_DELAY_MS = 8;
 
 // Time between the end of calibration and the start, to place the robot on
 // the line. Raise it if you need more time.
@@ -154,10 +171,12 @@ constexpr int16_t LINE_LOST_LOW  = 250;
 constexpr int16_t LINE_LOST_HIGH = 6750;
 
 // ================== PID ==================
-// The error goes from -3500 to +3500. The correction is limited to
-// +-BASE_SPEED, so it saturates quickly:
-//  - KP alone saturates when |error| > BASE_SPEED / KP (currently 80 / 0.08
-//    = 1000, i.e. one sensor away from the center).
+// The error goes from -3500 to +3500 (sensors are 1000 apart). The
+// correction is limited to +-(current base speed), so it saturates quickly:
+//  - KP alone saturates when |error| > baseSpeed / KP. With the values below:
+//    105 / 0.08 ~= 1300 at CURVE_SPEED, 170 / 0.08 ~= 2100 at STRAIGHT_SPEED.
+//    The smaller this number, the more the PID behaves like on/off
+//    (vibration).
 //  - KP: how hard it turns for a given offset. Too low: misses curves.
 //    Too high: wobbles on straights.
 //  - KD: reacts to how fast the error changes; damps the wobble. Too low:
@@ -166,36 +185,85 @@ constexpr int16_t LINE_LOST_HIGH = 6750;
 //    previous INTEGRAL_WINDOW errors only (short memory), so it acts more
 //    like extra "push" on sustained curves than a classic integral.
 //    Too high: slow, wide oscillation.
-constexpr float   KP = 0.15f;
+// KP/KD below were tuned at 105, which is CURVE_SPEED.
+constexpr float   KP = 0.08f;
 constexpr float   KI = 0.00f;
-constexpr float   KD = 0.16f;
+constexpr float   KD = 0.15f;
 constexpr uint8_t INTEGRAL_WINDOW = 6;
 
 // ================== SPEEDS (PWM duty, 0-255) ==================
-// BASE_SPEED: speed of both wheels on a centered line. During line following
-// no wheel ever goes above this value (the PID only slows one wheel down).
-// Raise it only after the PID is stable at the current value.
-constexpr int BASE_SPEED = 170;
+// STRAIGHT_SPEED: base speed with the line centered (straights). With speed
+// scheduling OFF, the robot uses this speed everywhere.
+constexpr int STRAIGHT_SPEED = 170;
 
-// MAX_SPEED: cap applied to every motor command in driveMotor(). Since line
-// following never exceeds BASE_SPEED, in practice this cap only affects
-// recoverLine(): see the note on the brake speeds below.
-constexpr int MAX_SPEED  = 220;
+// CURVE_SPEED: base speed when the robot is far off-center (corners). Only
+// used with speed scheduling ON. Set it to a speed at which the robot takes
+// every corner cleanly; the PID gains should be tuned at this speed.
+constexpr int CURVE_SPEED = 105;
+
+// MAX_SPEED: hard cap for any wheel. Must be >= STRAIGHT_SPEED. With
+// two-wheel steering ON, the outer wheel can go up to this value. It also
+// caps the recovery speeds.
+constexpr int MAX_SPEED = 220;
 
 // MIN_SPEED: any non-zero command below this is raised to it, because below
 // a certain PWM the motor hums but does not turn.
-//  - How to find it: on the floor, with the robot's weight, raise the PWM of
-//    each motor from 0 until the wheel starts turning reliably. Use the higher
-//    of the two motors' values plus ~10%.
+//  - How to find it: motor_test.ino, with the robot's weight on the wheels.
+//    Use the higher of the two motors' values plus ~10%.
 //  - Too low: a wheel stops in curves instead of slowing down.
-//    Too high: the PID loses resolution (fewer steps between MIN and BASE).
-constexpr int MIN_SPEED  = 50;
+//    Too high: the PID loses resolution (fewer steps between MIN and base).
+constexpr int MIN_SPEED = 50;
 
-// Brake / recovery speeds used by recoverLine().
-// NOTE: both are currently capped to MAX_SPEED by driveMotor(), so the
-// robot actually recovers at -90 / +90, not -120 / +220.
+// ---- SPEED SCHEDULING (option a) ----
+// The base speed depends on how far the line is from the center:
+//   |error| <= SLOWDOWN_START_ERROR  -> STRAIGHT_SPEED
+//   |error| >= SLOWDOWN_FULL_ERROR   -> CURVE_SPEED
+//   in between                       -> proportional mix of both
+// Slowing down is immediate; speeding up is limited by
+// SPEED_RAMP_UP_PER_SECOND.
+//  - Overshoots corners or loses the line at corner entry: lower
+//    SLOWDOWN_START_ERROR (slows down earlier) or lower CURVE_SPEED.
+//  - Takes corners cleanly but slowly: raise CURVE_SPEED by ~5-10 (and see
+//    the scaling rule in the header).
+//  - Speed keeps changing on straights (you hear the motor pitch go up and
+//    down): raise SLOWDOWN_START_ERROR.
+//  - Wobbles right after leaving a corner: lower SPEED_RAMP_UP_PER_SECOND.
+//  - Takes too long to reach top speed on straights: raise it.
+//    Current value: 105 -> 170 takes ~0.2 s.
+constexpr bool  ENABLE_SPEED_SCHEDULING  = true;
+constexpr int   SLOWDOWN_START_ERROR     = 500;
+constexpr int   SLOWDOWN_FULL_ERROR      = 1500;
+constexpr float SPEED_RAMP_UP_PER_SECOND = 300.0f;
+
+// ---- TWO-WHEEL STEERING (option b) ----
+// The difference between the wheels (how hard the robot turns) is always
+// the same as with this OFF, so KP/KD keep their meaning. What changes is
+// how the correction is split:
+//   OUTER_WHEEL_SHARE = 0.0 -> only the inner wheel slows (same as OFF)
+//   OUTER_WHEEL_SHARE = 0.5 -> inner slows and outer speeds up equally
+//   OUTER_WHEEL_SHARE = 1.0 -> only the outer wheel speeds up
+// If the outer wheel would exceed MAX_SPEED, both wheels are lowered by the
+// excess, so the turn is not weakened.
+//  - The robot keeps more speed in corners, so it also takes them wider.
+//    If it runs wide or loses the line in corners: lower OUTER_WHEEL_SHARE
+//    (try 0.25) or lower CURVE_SPEED.
+constexpr bool  ENABLE_TWO_WHEEL_STEERING = false;
+constexpr float OUTER_WHEEL_SHARE         = 0.5f;
+
+// ---- RECOVERY ----
+// Speeds used by recoverLine() when the line is lost (one wheel backward,
+// the other forward: spin toward the line). Both are capped by MAX_SPEED.
+// Higher values recover faster but can overshoot the line.
 constexpr int BRAKE_FORWARD_SPEED = 90;
 constexpr int BRAKE_REVERSE_SPEED = 90;
+
+// ================== Sanity checks (fail at compile time) ==================
+static_assert(MAX_SPEED >= STRAIGHT_SPEED, "MAX_SPEED must be >= STRAIGHT_SPEED");
+static_assert(CURVE_SPEED <= STRAIGHT_SPEED, "CURVE_SPEED must be <= STRAIGHT_SPEED");
+static_assert(SLOWDOWN_FULL_ERROR > SLOWDOWN_START_ERROR,
+              "SLOWDOWN_FULL_ERROR must be > SLOWDOWN_START_ERROR");
+static_assert(OUTER_WHEEL_SHARE >= 0.0f && OUTER_WHEEL_SHARE <= 1.0f,
+              "OUTER_WHEEL_SHARE must be between 0.0 and 1.0");
 
 // ================== State ==================
 QTRSensors qtr;
@@ -206,10 +274,15 @@ int lastError = 0;
 int errorHistory[INTEGRAL_WINDOW] = {0};
 uint8_t errorHistoryIndex = 0;
 
+float currentBaseSpeed = CURVE_SPEED;
+uint32_t lastSpeedUpdateMicros = 0;
+
 // ================== Function prototypes ==================
 void calibrateSensors();
 uint16_t readLinePosition();
 void followLine();
+int updateBaseSpeed(int error);
+void computeWheelSpeeds(int baseSpeed, int correction, int &leftSpeed, int &rightSpeed);
 void recoverLine();
 int applyMinimumSpeed(int speed);
 void setMotorSpeeds(int leftSpeed, int rightSpeed);
@@ -237,6 +310,10 @@ void setup() {
   stopMotors();
   calibrateSensors();
   delay(START_DELAY_MS);
+
+  // With scheduling ON, the robot starts at CURVE_SPEED and accelerates.
+  currentBaseSpeed = CURVE_SPEED;
+  lastSpeedUpdateMicros = micros();
 }
 
 void loop() {
@@ -284,21 +361,83 @@ void followLine() {
   errorHistoryIndex = (errorHistoryIndex + 1) % INTEGRAL_WINDOW;
   lastError = error;
 
+  const int baseSpeed = updateBaseSpeed(error);
+
   int correction = static_cast<int>(KP * error + KI * integral + KD * derivative);
-  correction = constrain(correction, -BASE_SPEED, BASE_SPEED);
+  correction = constrain(correction, -baseSpeed, baseSpeed);
 
-  int leftSpeed = BASE_SPEED;
-  int rightSpeed = BASE_SPEED;
-
-  // correction < 0: line on the left  -> slow the left wheel  -> turn left.
-  // correction > 0: line on the right -> slow the right wheel -> turn right.
-  if (correction < 0) {
-    leftSpeed += correction;
-  } else {
-    rightSpeed -= correction;
-  }
+  int leftSpeed = 0;
+  int rightSpeed = 0;
+  computeWheelSpeeds(baseSpeed, correction, leftSpeed, rightSpeed);
 
   setMotorSpeeds(applyMinimumSpeed(leftSpeed), applyMinimumSpeed(rightSpeed));
+}
+
+// Base speed for this loop (see SPEED SCHEDULING).
+int updateBaseSpeed(int error) {
+  if (!ENABLE_SPEED_SCHEDULING) {
+    return STRAIGHT_SPEED;
+  }
+
+  const int absError = abs(error);
+  float targetSpeed;
+
+  if (absError <= SLOWDOWN_START_ERROR) {
+    targetSpeed = STRAIGHT_SPEED;
+  } else if (absError >= SLOWDOWN_FULL_ERROR) {
+    targetSpeed = CURVE_SPEED;
+  } else {
+    const float fraction = static_cast<float>(absError - SLOWDOWN_START_ERROR) /
+                           (SLOWDOWN_FULL_ERROR - SLOWDOWN_START_ERROR);
+    targetSpeed = STRAIGHT_SPEED - fraction * (STRAIGHT_SPEED - CURVE_SPEED);
+  }
+
+  // A normal loop takes a few ms. If this function was not called for longer
+  // (e.g. a future pause/stop state), count at most MAX_STEP_SECONDS, so the
+  // robot never jumps straight to top speed after a gap.
+  constexpr float MAX_STEP_SECONDS = 0.02f;
+
+  const uint32_t now = micros();
+  float elapsedSeconds = (now - lastSpeedUpdateMicros) * 1e-6f;
+  lastSpeedUpdateMicros = now;
+  if (elapsedSeconds > MAX_STEP_SECONDS) {
+    elapsedSeconds = MAX_STEP_SECONDS;
+  }
+
+  if (targetSpeed < currentBaseSpeed) {
+    currentBaseSpeed = targetSpeed;  // slow down immediately
+  } else {
+    const float rampedSpeed = currentBaseSpeed + SPEED_RAMP_UP_PER_SECOND * elapsedSeconds;
+    currentBaseSpeed = (rampedSpeed < targetSpeed) ? rampedSpeed : targetSpeed;
+  }
+
+  return static_cast<int>(currentBaseSpeed + 0.5f);
+}
+
+// correction < 0: line on the left  -> turn left.
+// correction > 0: line on the right -> turn right.
+// The difference between the wheels is always |correction|; see
+// TWO-WHEEL STEERING for how it is split between them.
+void computeWheelSpeeds(int baseSpeed, int correction, int &leftSpeed, int &rightSpeed) {
+  const int turn = abs(correction);
+  const float outerShare = ENABLE_TWO_WHEEL_STEERING ? OUTER_WHEEL_SHARE : 0.0f;
+
+  int outerSpeed = baseSpeed + static_cast<int>(turn * outerShare + 0.5f);
+  int innerSpeed = outerSpeed - turn;
+
+  // Keep the outer wheel under MAX_SPEED without weakening the turn.
+  if (outerSpeed > MAX_SPEED) {
+    innerSpeed -= outerSpeed - MAX_SPEED;
+    outerSpeed = MAX_SPEED;
+  }
+
+  if (correction < 0) {
+    leftSpeed = innerSpeed;   // turn left: left wheel is the inner one
+    rightSpeed = outerSpeed;
+  } else {
+    leftSpeed = outerSpeed;   // turn right: right wheel is the inner one
+    rightSpeed = innerSpeed;
+  }
 }
 
 // Line lost: spin in place toward the side where it was last seen.
@@ -308,6 +447,10 @@ void recoverLine() {
   } else {
     setMotorSpeeds(BRAKE_FORWARD_SPEED, -BRAKE_REVERSE_SPEED);  // turn right
   }
+
+  // After recovering, start again from CURVE_SPEED and accelerate.
+  currentBaseSpeed = CURVE_SPEED;
+  lastSpeedUpdateMicros = micros();
 }
 
 int applyMinimumSpeed(int speed) {
